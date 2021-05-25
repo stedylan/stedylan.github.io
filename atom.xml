@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+    <id>https://stedylan.github.io</id>
+    <title>Gridea</title>
+    <updated>2021-05-25T08:18:18.376Z</updated>
+    <generator>https://github.com/jpmonette/feed</generator>
+    <link rel="alternate" href="https://stedylan.github.io"/>
+    <link rel="self" href="https://stedylan.github.io/atom.xml"/>
+    <subtitle>温故而知新</subtitle>
+    <logo>https://stedylan.github.io/images/avatar.png</logo>
+    <icon>https://stedylan.github.io/favicon.ico</icon>
+    <rights>All rights reserved 2021, Gridea</rights>
+    <entry>
+        <title type="html"><![CDATA[pytorch]]></title>
+        <id>https://stedylan.github.io/post/pytorch初学图像分类器/</id>
+        <link href="https://stedylan.github.io/post/pytorch初学图像分类器/">
+        </link>
+        <updated>2021-12-11T16:00:00.000Z</updated>
+        <content type="html"><![CDATA[<h1 id="训练一个图像分类器">训练一个图像分类器</h1>
+<p>1.使用torchvision加载和正则化CIFAR10训练集和测试集</p>
+<p>2.构造一个CNN</p>
+<p>3.构造损失函数</p>
+<p>4.训练网络</p>
+<p>5.测试网络</p>
+<h2 id="1-加载和正规化cifar10">1. 加载和正规化CIFAR10</h2>
+<pre><code class="language-python">import torch
+import torchvision
+import torchvision.transforms as transforms
+</code></pre>
+<pre><code class="language-python">transform = transforms.Compose(
+                                [transforms.ToTensor(),
+                                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=4, shuffle=True, num_workers=2)
+
+testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+                                       download=True, transform=transform)
+testloader = torch.utils.data.DataLoader(testset, batch_size=4,
+                                         shuffle=False, num_workers=2)
+
+classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+</code></pre>
+<pre><code>Files already downloaded and verified
+Files already downloaded and verified
+</code></pre>
+<pre><code class="language-python">import matplotlib.pyplot as plt
+import numpy as np
+
+def imshow(img):
+    img = img / 2 + 0.5
+    npimg = img.numpy()
+    plt.imshow(np.transpose(npimg, (1, 2, 0)))
+    plt.show()
+
+dataiter = iter(trainloader)
+images, labels = dataiter.next()
+
+imshow(torchvision.utils.make_grid(images))
+print(' '.join('%5s' % classes[labels[j]] for j in range(4)))
+</code></pre>
+<figure data-type="image" tabindex="1"><img src="https://img-blog.csdnimg.cn/20201222101039601.png#pic_center" alt="在这里插入图片描述" loading="lazy"></figure>
+<pre><code>truck   car  bird  ship
+</code></pre>
+<h2 id="2-定义一个卷积神经网络">2. 定义一个卷积神经网络</h2>
+<pre><code class="language-python">import torch.nn as nn
+import torch.nn.functional as F
+
+device = torch.device(&quot;cuda:0&quot; if torch.cuda.is_available() else &quot;cpu&quot;)
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(3, 6, 5)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(6, 16, 5)
+        self.fc1 = nn.Linear(16 * 5 * 5, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, 10)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = x.view(-1, 16 * 5 * 5)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+
+net = Net()
+net.to(device)
+</code></pre>
+<pre><code>Net(
+  (conv1): Conv2d(3, 6, kernel_size=(5, 5), stride=(1, 1))
+  (pool): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  (conv2): Conv2d(6, 16, kernel_size=(5, 5), stride=(1, 1))
+  (fc1): Linear(in_features=400, out_features=120, bias=True)
+  (fc2): Linear(in_features=120, out_features=84, bias=True)
+  (fc3): Linear(in_features=84, out_features=10, bias=True)
+)
+</code></pre>
+<h2 id="3-定义损失函数和优化器">3. 定义损失函数和优化器</h2>
+<pre><code class="language-python">import torch.optim as optim
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9) # momentum为动量，解决局部最优解问题
+</code></pre>
+<h2 id="4-训练cnn">4. 训练CNN</h2>
+<pre><code class="language-python">
+for epoch in range(2):
+    running_loss = 0.0
+    for i, data in enumerate(trainloader, 0):
+        # inputs, labels = data # 使用cpu训练
+        inputs, labels = data[0].to(device), data[1].to(device) # 使用gpu训练
+
+        optimizer.zero_grad()
+
+        outputs = net(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        if i % 2000 == 1999: # 每两千次，计算一下loss的总和，看总体的降低
+            print('[%d, %5d] loss: %.3f' % (epoch + 1, i + 1, running_loss / 2000))
+            running_loss = 0.0
+
+print('Finished Training')
+</code></pre>
+<pre><code>[1,  2000] loss: 2.139
+[1,  4000] loss: 1.818
+[1,  6000] loss: 1.678
+[1,  8000] loss: 1.575
+[1, 10000] loss: 1.523
+[1, 12000] loss: 1.490
+[2,  2000] loss: 1.417
+[2,  4000] loss: 1.345
+[2,  6000] loss: 1.356
+[2,  8000] loss: 1.314
+[2, 10000] loss: 1.291
+[2, 12000] loss: 1.279
+Finished Training
+</code></pre>
+<pre><code class="language-python">PATH = './cifar_net.pth'
+torch.save(net.state_dict(), PATH)
+</code></pre>
+<h2 id="5-测试网络">5. 测试网络</h2>
+<pre><code class="language-python">dataiter = iter(testloader) # dataload迭代器
+images, labels = dataiter.next() 
+
+# print images
+imshow(torchvision.utils.make_grid(images))
+print('GroundTruth: ', ' '.join('%5s' % classes[labels[j]] for j in range(4)))
+</code></pre>
+<figure data-type="image" tabindex="2"><img src="https://img-blog.csdnimg.cn/20201222101054704.png#pic_center" alt="在这里插入图片描述" loading="lazy"></figure>
+<pre><code>GroundTruth:    cat  ship  ship plane
+</code></pre>
+<pre><code class="language-python">net = Net()
+net.load_state_dict(torch.load(PATH))
+outputs = net(images)
+</code></pre>
+<pre><code class="language-python">_, predicted = torch.max(outputs, 1) # dim = 1, 将维度压缩为1
+print(outputs) # 每一行代表一个图片的输出值
+print(predicted) # 每张图片最大输出值的下边
+
+print('Predicted: ', ' '.join('%5s' % classes[predicted[j]]
+                              for j in range(4)))
+</code></pre>
+<pre><code>tensor([[-2.5090, -3.2349,  1.7301,  2.9694,  3.0115,  2.8149,  3.4539,  0.7578,
+         -3.6328, -3.4352],
+        [-0.8140, -4.5701,  2.3966,  2.8336, -0.1575,  5.3245, -0.4004,  1.8420,
+         -3.9213, -2.3566],
+        [ 1.6518,  0.1281,  2.1819, -0.2296,  4.1228, -0.2814,  1.4106, -0.8388,
+         -2.4360, -3.0393],
+        [-1.2521, -3.1468,  0.3812,  0.9961,  4.1565,  1.7851,  0.2695,  6.6411,
+         -5.3557, -1.3407]])
+tensor([6, 5, 4, 7])
+Predicted:   frog   dog  deer horse
+</code></pre>
+<pre><code class="language-python">correct = 0
+total = 0
+with torch.no_grad(): # 预测的话不需要计算gradient
+    for data in testloader:
+        images, labels = data
+        outputs = net(images)
+        _, predicted = torch.max(outputs.data, 1) 
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print('Accuracy of the network on the 10000 test images: %d %%' % (
+    100 * correct / total))
+</code></pre>
+<pre><code>Accuracy of the network on the 10000 test images: 56 %
+</code></pre>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[DewarpNet]]></title>
+        <id>https://stedylan.github.io/post/README/</id>
+        <link href="https://stedylan.github.io/post/README/">
+        </link>
+        <updated>2020-12-11T16:00:00.000Z</updated>
+        <content type="html"><![CDATA[<h1 id="dewarpnet">DewarpNet</h1>
+<p>This repository contains the codes for <a href="https://www3.cs.stonybrook.edu/~cvl/projects/dewarpnet/storage/paper.pdf"><strong>DewarpNet</strong></a> training.</p>
+<h3 id="recent-updates">Recent Updates</h3>
+<ul>
+<li><strong>[May, 2020]</strong> Added evaluation images and an important note about Matlab SSIM.</li>
+<li><strong>[Dec, 2020]</strong> Added OCR evaluation details.</li>
+</ul>
+<h3 id="training">Training</h3>
+<ul>
+<li>Prepare Data: <code>train.txt</code> &amp; <code>val.txt</code>. Contents should be like:</li>
+</ul>
+<pre><code>1/824_8-cp_Page_0503-7Ns0001
+1/824_1-cp_Page_0504-2Cw0001
+</code></pre>
+<ul>
+<li>Train Shape Network:<br>
+<code>python trainwc.py --arch unetnc --data_path ./data/DewarpNet/doc3d/ --batch_size 50 --tboard</code></li>
+<li>Train Texture Mapping Network:<br>
+<code>python trainbm.py --arch dnetccnl --img_rows 128 --img_cols 128 --img_norm --n_epoch 250 --batch_size 50 --l_rate 0.0001 --tboard --data_path ./DewarpNet/doc3d</code></li>
+</ul>
+<h3 id="inference">Inference:</h3>
+<ul>
+<li>Run:<br>
+<code>python infer.py --wc_model_path ./eval/models/unetnc_doc3d.pkl --bm_model_path ./eval/models/dnetccnl_doc3d.pkl --show</code></li>
+</ul>
+<h3 id="evaluation-image-metrics">Evaluation (Image Metrics):</h3>
+<ul>
+<li>
+<p>We use the same evaluation code as <a href="https://www3.cs.stonybrook.edu/~cvl/docunet.html">DocUNet</a>.<br>
+To reproduce the quantitative results reported in the paper use the images available <a href="https://drive.google.com/drive/folders/1aPfQHGrGxpuIbYLONydbSkGNygRX2z2P?usp=sharing">here</a>.</p>
+</li>
+<li>
+<p><strong>[Important note about Matlab version]</strong> We noticed that Matlab 2020a uses a different SSIM implementation which gives a better MS-SSIM score (0.5623). Whereas we have used Matlab 2018b. Please compare the scores according to your Matlab version.</p>
+</li>
+</ul>
+<h3 id="evaluation-ocr-metrics">Evaluation (OCR Metrics):</h3>
+<ul>
+<li>The 25 images used for OCR evaluation is <code>/eval/ocr_eval/ocr_files.txt</code></li>
+<li>The corresponding ground-truth text is given in <code>/eval/ocr_eval/tess_gt.json</code></li>
+<li>For the OCR errors reported in the paper we had used cv2.blur as pre-processing which gives higher error in all the cases. For convenience, we provide the updated numbers (without using blur) in the following table:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th style="text-align:center">Method</th>
+<th style="text-align:center">ED</th>
+<th style="text-align:center">CER</th>
+<th style="text-align:center">ED  (no blur)</th>
+<th style="text-align:center">CER (no blur)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:center">DocUNet</td>
+<td style="text-align:center">1975.86</td>
+<td style="text-align:center">0.4656(0.263)</td>
+<td style="text-align:center">1671.80</td>
+<td style="text-align:center">0.403 (0.256)</td>
+</tr>
+<tr>
+<td style="text-align:center">DocUNet on Doc3D</td>
+<td style="text-align:center">1684.34</td>
+<td style="text-align:center">0.3955 (0.272)</td>
+<td style="text-align:center">1296.00</td>
+<td style="text-align:center">0.294 (0.235)</td>
+</tr>
+<tr>
+<td style="text-align:center">DewarpNet</td>
+<td style="text-align:center">1288.60</td>
+<td style="text-align:center">0.3136 (0.248)</td>
+<td style="text-align:center">1007.28</td>
+<td style="text-align:center">0.249 (0.236)</td>
+</tr>
+<tr>
+<td style="text-align:center">DewarpNet (ref)</td>
+<td style="text-align:center">1114.40</td>
+<td style="text-align:center">0.2692 (0.234)</td>
+<td style="text-align:center">812.48</td>
+<td style="text-align:center">0.204 (0.228)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>We had used the Tesseract (v4.1.0) default configuration for evaluation with PyTesseract (v0.2.6).</li>
+</ul>
+<h3 id="models">Models:</h3>
+<ul>
+<li>Pre-trained models are available <a href="https://drive.google.com/file/d/1hJKCb4eF1AJih_dhZOJSF5VR-ZtRNaap/view?usp=sharing">here</a>. These models are captured prior to  end-to-end training, thus won't give you the end-to-end results reported in Table 2 of the paper. Use the images provided above to get the exact numbers as Table 2.</li>
+</ul>
+<h3 id="dataset">Dataset:</h3>
+<ul>
+<li>The <em>doc3D dataset</em> can be downloaded using the scripts <a href="https://github.com/cvlab-stonybrook/doc3D-dataset">here</a>.</li>
+</ul>
+<h3 id="more-stuff">More Stuff:</h3>
+<ul>
+<li><a href="https://sagniklp.github.io/dewarpnet-demo/">Demo</a></li>
+<li><a href="https://www3.cs.stonybrook.edu/~cvl/projects/dewarpnet/">Project Page</a></li>
+<li><a href="https://github.com/sagniklp/doc3D-renderer">Doc3D Rendering Codes</a></li>
+</ul>
+<h3 id="citation">Citation:</h3>
+<p>If you use the dataset or this code, please consider citing our work-</p>
+<pre><code>@inproceedings{SagnikKeICCV2019, 
+Author = {Sagnik Das*, Ke Ma*, Zhixin Shu, Dimitris Samaras, Roy Shilkrot}, 
+Booktitle = {Proceedings of International Conference on Computer Vision}, 
+Title = {DewarpNet: Single-Image Document Unwarping With Stacked 3D and 2D Regression Networks}, 
+Year = {2019}}   
+</code></pre>
+<h4 id="acknowledgements">Acknowledgements:</h4>
+<ul>
+<li>These codes are heavily structured on <a href="https://github.com/meetshah1995/pytorch-semseg">pytorch-semseg</a>.</li>
+</ul>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Hello Gridea]]></title>
+        <id>https://stedylan.github.io/post/hello-gridea/</id>
+        <link href="https://stedylan.github.io/post/hello-gridea/">
+        </link>
+        <updated>2018-12-11T16:00:00.000Z</updated>
+        <summary type="html"><![CDATA[<p>👏  欢迎使用 <strong>Gridea</strong> ！<br>
+✍️  <strong>Gridea</strong> 一个静态博客写作客户端。你可以用它来记录你的生活、心情、知识、笔记、创意... ...</p>
+]]></summary>
+        <content type="html"><![CDATA[<p>👏  欢迎使用 <strong>Gridea</strong> ！<br>
+✍️  <strong>Gridea</strong> 一个静态博客写作客户端。你可以用它来记录你的生活、心情、知识、笔记、创意... ...</p>
+<!-- more -->
+<p><a href="https://github.com/getgridea/gridea">Github</a><br>
+<a href="https://gridea.dev/">Gridea 主页</a><br>
+<a href="http://fehey.com/">示例网站</a></p>
+<h2 id="特性">特性👇</h2>
+<p>📝  你可以使用最酷的 <strong>Markdown</strong> 语法，进行快速创作</p>
+<p>🌉  你可以给文章配上精美的封面图和在文章任意位置插入图片</p>
+<p>🏷️  你可以对文章进行标签分组</p>
+<p>📋  你可以自定义菜单，甚至可以创建外部链接菜单</p>
+<p>💻  你可以在 <strong>Windows</strong>，<strong>MacOS</strong> 或 <strong>Linux</strong> 设备上使用此客户端</p>
+<p>🌎  你可以使用 <strong>𝖦𝗂𝗍𝗁𝗎𝖻 𝖯𝖺𝗀𝖾𝗌</strong> 或 <strong>Coding Pages</strong> 向世界展示，未来将支持更多平台</p>
+<p>💬  你可以进行简单的配置，接入 <a href="https://github.com/gitalk/gitalk">Gitalk</a> 或 <a href="https://github.com/SukkaW/DisqusJS">DisqusJS</a> 评论系统</p>
+<p>🇬🇧  你可以使用<strong>中文简体</strong>或<strong>英语</strong></p>
+<p>🌁  你可以任意使用应用内默认主题或任意第三方主题，强大的主题自定义能力</p>
+<p>🖥  你可以自定义源文件夹，利用 OneDrive、百度网盘、iCloud、Dropbox 等进行多设备同步</p>
+<p>🌱 当然 <strong>Gridea</strong> 还很年轻，有很多不足，但请相信，它会不停向前 🏃</p>
+<p>未来，它一定会成为你离不开的伙伴</p>
+<p>尽情发挥你的才华吧！</p>
+<p>😘 Enjoy~</p>
+]]></content>
+    </entry>
+</feed>
